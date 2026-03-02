@@ -1,0 +1,23 @@
+{
+  "skill_name": "transcript-parser",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "What did I work on today? Give me a summary of my sessions.",
+      "expected_output": "A summary of today's sessions across all projects, showing timestamps, projects, and first prompts. Should use list-sessions or recent with today's date filter.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "prompt": "Find all my conversations where I discussed 'plugin' or 'marketplace' — I want to review my thinking around plugin architecture decisions",
+      "expected_output": "Search results showing conversations mentioning 'plugin' and 'marketplace' with context snippets and session IDs. Should then drill into specific sessions to show the actual discussion.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Show me my last few sessions in the x-cli project — I want to see what I was working on most recently there",
+      "expected_output": "List of recent sessions filtered to the x-cli project, then reading the most recent session to show the conversation. Should use --project flag with x-cli.",
+      "files": []
+    }
+  ]
+}
