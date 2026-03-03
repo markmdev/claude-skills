@@ -217,7 +217,13 @@ def session_summary(path: Path) -> dict | None:
 
 
 def dedup_assistant_entries(entries: list[dict]) -> list[dict]:
-    """Deduplicate streaming assistant entries — keep the last per requestId."""
+    """Merge streaming assistant entries — combine all content blocks per requestId.
+
+    Claude Code streams responses incrementally: each JSONL entry for the same
+    requestId contains only the latest content block (not the accumulated set).
+    A single response producing [thinking, text, tool_use, tool_use] writes 4
+    entries each with 1 block. We merge them into one entry with all 4 blocks.
+    """
     seen_request_ids: dict[str, int] = {}
     result = []
 
@@ -226,12 +232,26 @@ def dedup_assistant_entries(entries: list[dict]) -> list[dict]:
             req_id = entry.get("requestId")
             if req_id:
                 if req_id in seen_request_ids:
-                    # Replace the earlier entry
-                    result[seen_request_ids[req_id]] = None
+                    # Merge content blocks into the existing entry
+                    idx = seen_request_ids[req_id]
+                    existing = result[idx]
+                    existing_content = existing.get("message", {}).get("content", [])
+                    new_content = entry.get("message", {}).get("content", [])
+                    if isinstance(existing_content, list) and isinstance(new_content, list):
+                        existing_content.extend(new_content)
+                    # Update metadata from the latest entry (model, timestamp, etc.)
+                    existing["timestamp"] = entry.get("timestamp", existing.get("timestamp", ""))
+                    existing_msg = existing.get("message", {})
+                    new_msg = entry.get("message", {})
+                    if new_msg.get("model"):
+                        existing_msg["model"] = new_msg["model"]
+                    if new_msg.get("stop_reason"):
+                        existing_msg["stop_reason"] = new_msg["stop_reason"]
+                    continue
                 seen_request_ids[req_id] = len(result)
         result.append(entry)
 
-    return [e for e in result if e is not None]
+    return result
 
 
 def format_content(content) -> str:
