@@ -64,7 +64,7 @@ Assistant responses with tool calls and thinking.
 - `{"type": "thinking", "thinking": "...", "signature": "..."}` — extended thinking
 - `{"type": "tool_use", "id": "toolu_...", "name": "Bash", "input": {...}}` — tool invocation
 
-**Streaming behavior**: A single API request produces multiple JSONL lines as content blocks stream in. Each shares the same `requestId`. Take the **last entry per requestId** for the complete response.
+**Streaming behavior**: A single API request produces multiple JSONL lines as content blocks stream in. Each shares the same `requestId`, but each entry contains only the latest content block — not the full accumulated set. To reconstruct the complete response, **merge all content blocks** across every entry sharing the same `requestId`. A response that produces [thinking, text, tool_use, tool_use] writes 4 entries, each with 1 block. Merging them yields one logical response with all 4 blocks.
 
 ### type: "system"
 

@@ -9,7 +9,7 @@ Analyze Claude Code conversation transcripts stored in `~/.claude/projects/`. Us
 
 ## Quick Reference
 
-The script lives at `~/.claude/skills/transcript-parser/scripts/parse_transcript.py`. Run it with Python 3:
+The script lives at `~/.claude/skills/transcript-parser/scripts/parse_transcript.py`. Run it with Python 3.10+:
 
 ```bash
 python ~/.claude/skills/transcript-parser/scripts/parse_transcript.py <command> [options]

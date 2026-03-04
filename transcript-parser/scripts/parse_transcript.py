@@ -51,12 +51,15 @@ def clean_content_blocks(content) -> list[dict]:
             name = block.get("name", "unknown")
             inp = block.get("input", {})
             # Clean heavy fields from tool inputs
-            clean_inp = {}
-            for k, v in inp.items():
-                if isinstance(v, str) and len(v) > 500:
-                    clean_inp[k] = v[:500] + f"... [{len(v)} chars total]"
-                else:
-                    clean_inp[k] = v
+            if isinstance(inp, dict):
+                clean_inp = {}
+                for k, v in inp.items():
+                    if isinstance(v, str) and len(v) > 500:
+                        clean_inp[k] = v[:500] + f"... [{len(v)} chars total]"
+                    else:
+                        clean_inp[k] = v
+            else:
+                clean_inp = inp
             blocks.append({"type": "tool_use", "tool": name, "input": clean_inp})
 
         elif block_type == "tool_result":
@@ -175,6 +178,7 @@ def session_summary(path: Path) -> dict | None:
     version = None
     model = None
     git_branch = None
+    seen_request_ids: set[str] = set()
 
     for entry in iter_jsonl(path):
         entry_type = entry.get("type", "")
@@ -204,9 +208,15 @@ def session_summary(path: Path) -> dict | None:
                     first_user_msg = content[:200]
 
         elif entry_type == "assistant" and not entry.get("isSidechain"):
-            msg_count += 1
-            if model is None:
-                model = entry.get("message", {}).get("model")
+            req_id = entry.get("requestId")
+            if req_id and req_id in seen_request_ids:
+                pass  # streaming duplicate, don't count
+            else:
+                if req_id:
+                    seen_request_ids.add(req_id)
+                msg_count += 1
+                if model is None:
+                    model = entry.get("message", {}).get("model")
 
     if msg_count == 0:
         return None
@@ -512,8 +522,16 @@ def cmd_list_sessions(args):
     """List sessions across projects."""
     project_filter = args.project
     limit = args.limit or 20
-    since = parse_timestamp(args.since) if args.since else None
-    until = parse_timestamp(args.until) if args.until else None
+    try:
+        since = parse_timestamp(args.since) if args.since else None
+    except (ValueError, TypeError) as e:
+        print(f"Error: invalid --since value '{args.since}': {e}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        until = parse_timestamp(args.until) if args.until else None
+    except (ValueError, TypeError) as e:
+        print(f"Error: invalid --until value '{args.until}': {e}", file=sys.stderr)
+        sys.exit(1)
 
     sessions = []
 
@@ -633,8 +651,16 @@ def cmd_read(args):
         sys.exit(1)
 
     entry_types = set(args.types.split(",")) if args.types else None
-    since = parse_timestamp(args.since) if args.since else None
-    until = parse_timestamp(args.until) if args.until else None
+    try:
+        since = parse_timestamp(args.since) if args.since else None
+    except (ValueError, TypeError) as e:
+        print(f"Error: invalid --since value '{args.since}': {e}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        until = parse_timestamp(args.until) if args.until else None
+    except (ValueError, TypeError) as e:
+        print(f"Error: invalid --until value '{args.until}': {e}", file=sys.stderr)
+        sys.exit(1)
     no_tool_results = getattr(args, "no_tool_results", False)
 
     if args.session_id:
@@ -667,8 +693,16 @@ def cmd_recent(args):
     """Show recent messages across sessions."""
     project_filter = args.project
     limit = args.limit or 50
-    since = parse_timestamp(args.since) if args.since else None
-    until = parse_timestamp(args.until) if args.until else None
+    try:
+        since = parse_timestamp(args.since) if args.since else None
+    except (ValueError, TypeError) as e:
+        print(f"Error: invalid --since value '{args.since}': {e}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        until = parse_timestamp(args.until) if args.until else None
+    except (ValueError, TypeError) as e:
+        print(f"Error: invalid --until value '{args.until}': {e}", file=sys.stderr)
+        sys.exit(1)
     entry_types = set(args.types.split(",")) if args.types else None
     no_tool_results = getattr(args, "no_tool_results", False)
 
@@ -735,8 +769,16 @@ def cmd_search(args):
     """Search transcripts for a regex pattern (falls back to literal substring)."""
     project_filter = args.project
     limit = args.limit or 20
-    since = parse_timestamp(args.since) if args.since else None
-    until = parse_timestamp(args.until) if args.until else None
+    try:
+        since = parse_timestamp(args.since) if args.since else None
+    except (ValueError, TypeError) as e:
+        print(f"Error: invalid --since value '{args.since}': {e}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        until = parse_timestamp(args.until) if args.until else None
+    except (ValueError, TypeError) as e:
+        print(f"Error: invalid --until value '{args.until}': {e}", file=sys.stderr)
+        sys.exit(1)
     no_tool_results = getattr(args, "no_tool_results", False)
 
     # Compile regex pattern (case-insensitive). Fall back to escaped literal on bad regex.
@@ -752,12 +794,21 @@ def cmd_search(args):
             continue
 
         for session_file in get_session_files(project_dir):
+            seen_request_ids: set[str] = set()
             for entry in iter_jsonl(session_file):
                 etype = entry.get("type", "")
                 if etype in SKIP_TYPES:
                     continue
                 if not args.include_subagents and entry.get("isSidechain", False):
                     continue
+
+                # Deduplicate streaming assistant entries — skip duplicates
+                if etype == "assistant":
+                    req_id = entry.get("requestId")
+                    if req_id:
+                        if req_id in seen_request_ids:
+                            continue
+                        seen_request_ids.add(req_id)
 
                 # Filter by timestamp
                 if since or until:
@@ -834,8 +885,16 @@ def _extract_match_context(text: str, pattern: re.Pattern, context_chars: int = 
 def cmd_tools(args):
     """Analyze tool usage patterns."""
     project_filter = args.project
-    since = parse_timestamp(args.since) if args.since else None
-    until = parse_timestamp(args.until) if args.until else None
+    try:
+        since = parse_timestamp(args.since) if args.since else None
+    except (ValueError, TypeError) as e:
+        print(f"Error: invalid --since value '{args.since}': {e}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        until = parse_timestamp(args.until) if args.until else None
+    except (ValueError, TypeError) as e:
+        print(f"Error: invalid --until value '{args.until}': {e}", file=sys.stderr)
+        sys.exit(1)
 
     all_entries = []
     session_count = 0
