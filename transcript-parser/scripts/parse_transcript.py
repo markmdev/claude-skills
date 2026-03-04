@@ -383,64 +383,10 @@ def format_entry_readable(entry: dict, no_tool_results: bool = False) -> str:
     return ""
 
 
-def _extract_text_blocks(content) -> str:
-    """Extract and join text blocks from message content."""
-    if isinstance(content, str):
-        return content.strip()
-    if not isinstance(content, list):
-        return str(content).strip()
-    texts = []
-    for block in content:
-        if isinstance(block, dict) and block.get("type") == "text":
-            text = block.get("text", "").strip()
-            if text:
-                texts.append(text)
-    return " ".join(texts)
-
-
-def format_entry_brief(entry: dict) -> str:
-    """Format a single entry as a condensed single-line summary.
-
-    Shows the first ~100 characters of text content per turn for a quick
-    conversation arc view. System entries are skipped.
-    """
-    entry_type = entry.get("type", "unknown")
-
-    if entry_type == "system":
-        return ""
-
-    ts = entry.get("timestamp", "")
-    if ts:
-        try:
-            dt = parse_timestamp(ts)
-            ts_str = dt.strftime("%Y-%m-%d %H:%M:%S")
-        except (ValueError, TypeError):
-            ts_str = ts
-    else:
-        ts_str = ""
-
-    if entry_type == "user":
-        is_sidechain = entry.get("isSidechain", False)
-        role = "[subagent-user]" if is_sidechain else "[user]"
-        text = _extract_text_blocks(entry.get("message", {}).get("content", ""))
-        if not text:
-            return ""
-        return f"{ts_str} {role} {text[:100]}"
-
-    elif entry_type == "assistant":
-        is_sidechain = entry.get("isSidechain", False)
-        role = "[subagent-assistant]" if is_sidechain else "[assistant]"
-        text = _extract_text_blocks(entry.get("message", {}).get("content", []))
-        if not text:
-            return ""
-        return f"{ts_str} {role} {text[:100]}"
-
-    return ""
-
-
 def read_session(path: Path, include_subagents: bool = False,
                  entry_types: set | None = None,
                  since: datetime | None = None,
+                 until: datetime | None = None,
                  limit: int | None = None,
                  no_tool_results: bool = False) -> list[dict]:
     """Read and filter entries from a session file.
@@ -450,6 +396,7 @@ def read_session(path: Path, include_subagents: bool = False,
         include_subagents: If True, include subagent (sidechain) entries.
         entry_types: If set, only include entries with these types.
         since: If set, only include entries after this timestamp.
+        until: If set, only include entries before this timestamp.
         limit: If set, return only the last N entries.
         no_tool_results: If True, skip user entries that contain only tool_result
             blocks (no human-typed content).
@@ -471,11 +418,14 @@ def read_session(path: Path, include_subagents: bool = False,
             continue
 
         # Filter by timestamp
-        if since:
+        if since or until:
             ts = entry.get("timestamp")
             if ts:
                 try:
-                    if parse_timestamp(ts) < since:
+                    entry_ts = parse_timestamp(ts)
+                    if since and entry_ts < since:
+                        continue
+                    if until and entry_ts > until:
                         continue
                 except (ValueError, TypeError):
                     pass
@@ -562,6 +512,7 @@ def cmd_list_sessions(args):
     project_filter = args.project
     limit = args.limit or 20
     since = parse_timestamp(args.since) if args.since else None
+    until = parse_timestamp(args.until) if args.until else None
 
     sessions = []
 
@@ -573,9 +524,12 @@ def cmd_list_sessions(args):
             summary = session_summary(session_file)
             if summary:
                 # Filter by start timestamp
-                if since and summary.get("started"):
+                if summary.get("started"):
                     try:
-                        if parse_timestamp(summary["started"]) < since:
+                        started_ts = parse_timestamp(summary["started"])
+                        if since and started_ts < since:
+                            continue
+                        if until and started_ts > until:
                             continue
                     except (ValueError, TypeError):
                         pass
@@ -620,7 +574,8 @@ def _find_session_file(session_id: str) -> Path | None:
 
 
 def _collect_sessions(project_filter: str | None = None,
-                      since: datetime | None = None) -> list[dict]:
+                      since: datetime | None = None,
+                      until: datetime | None = None) -> list[dict]:
     """Collect session summaries across projects, optionally filtered."""
     sessions = []
     for project_dir in get_project_dirs():
@@ -629,9 +584,12 @@ def _collect_sessions(project_filter: str | None = None,
         for session_file in get_session_files(project_dir):
             summary = session_summary(session_file)
             if summary:
-                if since and summary.get("started"):
+                if summary.get("started"):
                     try:
-                        if parse_timestamp(summary["started"]) < since:
+                        started_ts = parse_timestamp(summary["started"])
+                        if since and started_ts < since:
+                            continue
+                        if until and started_ts > until:
                             continue
                     except (ValueError, TypeError):
                         pass
@@ -641,14 +599,15 @@ def _collect_sessions(project_filter: str | None = None,
     return sessions
 
 
-def _print_session(path: Path, args, entry_types, since, brief: bool,
-                   no_tool_results: bool):
+def _print_session(path: Path, args, entry_types, since,
+                   no_tool_results: bool, until: datetime | None = None):
     """Read and print a single session's entries."""
     entries = read_session(
         path,
         include_subagents=args.include_subagents,
         entry_types=entry_types,
         since=since,
+        until=until,
         limit=args.limit,
         no_tool_results=no_tool_results,
     )
@@ -658,10 +617,7 @@ def _print_session(path: Path, args, entry_types, since, brief: bool,
         print()
     else:
         for entry in entries:
-            if brief:
-                formatted = format_entry_brief(entry)
-            else:
-                formatted = format_entry_readable(entry, no_tool_results=no_tool_results)
+            formatted = format_entry_readable(entry, no_tool_results=no_tool_results)
             if formatted:
                 print(formatted)
 
@@ -677,24 +633,21 @@ def cmd_read(args):
 
     entry_types = set(args.types.split(",")) if args.types else None
     since = parse_timestamp(args.since) if args.since else None
-    brief = getattr(args, "brief", False)
+    until = parse_timestamp(args.until) if args.until else None
     no_tool_results = getattr(args, "no_tool_results", False)
-
-    # Brief mode auto-enables no_tool_results
-    if brief:
-        no_tool_results = True
 
     if args.session_id:
         found = _find_session_file(args.session_id)
         if not found:
             print(f"Session not found: {args.session_id}", file=sys.stderr)
             sys.exit(1)
-        _print_session(found, args, entry_types, since, brief, no_tool_results)
+        _print_session(found, args, entry_types, since, no_tool_results, until=until)
     else:
         # Batch read: --last N
         sessions = _collect_sessions(
             project_filter=args.project,
             since=since,
+            until=until,
         )
         sessions = sessions[:args.last]
 
@@ -706,7 +659,7 @@ def cmd_read(args):
             print(f"\n{'='*60}")
             print(f"  {project} — {started} — {msg_count} msgs")
             print(f"{'='*60}\n")
-            _print_session(path, args, entry_types, since, brief, no_tool_results)
+            _print_session(path, args, entry_types, since, no_tool_results, until=until)
 
 
 def cmd_recent(args):
@@ -714,6 +667,7 @@ def cmd_recent(args):
     project_filter = args.project
     limit = args.limit or 50
     since = parse_timestamp(args.since) if args.since else None
+    until = parse_timestamp(args.until) if args.until else None
     entry_types = set(args.types.split(",")) if args.types else None
     no_tool_results = getattr(args, "no_tool_results", False)
 
@@ -733,6 +687,7 @@ def cmd_recent(args):
                 include_subagents=args.include_subagents,
                 entry_types=entry_types,
                 since=since,
+                until=until,
                 no_tool_results=no_tool_results,
             )
             for e in entries:
@@ -781,6 +736,7 @@ def cmd_search(args):
     project_filter = args.project
     limit = args.limit or 20
     since = parse_timestamp(args.since) if args.since else None
+    until = parse_timestamp(args.until) if args.until else None
     no_tool_results = getattr(args, "no_tool_results", False)
 
     results = []
@@ -798,11 +754,14 @@ def cmd_search(args):
                     continue
 
                 # Filter by timestamp
-                if since:
+                if since or until:
                     ts = entry.get("timestamp")
                     if ts:
                         try:
-                            if parse_timestamp(ts) < since:
+                            entry_ts = parse_timestamp(ts)
+                            if since and entry_ts < since:
+                                continue
+                            if until and entry_ts > until:
                                 continue
                         except (ValueError, TypeError):
                             pass
@@ -869,6 +828,7 @@ def cmd_tools(args):
     """Analyze tool usage patterns."""
     project_filter = args.project
     since = parse_timestamp(args.since) if args.since else None
+    until = parse_timestamp(args.until) if args.until else None
 
     all_entries = []
     session_count = 0
@@ -882,6 +842,7 @@ def cmd_tools(args):
                 session_file,
                 include_subagents=args.include_subagents,
                 since=since,
+                until=until,
             )
             if entries:
                 session_count += 1
@@ -939,6 +900,7 @@ def main():
     add_common_args(ls)
     ls.add_argument("--limit", "-n", type=int, default=20, help="Max sessions to show")
     ls.add_argument("--since", help="Only sessions after this ISO timestamp")
+    ls.add_argument("--until", help="Only sessions before this ISO timestamp")
     ls.set_defaults(func=cmd_list_sessions)
 
     # read
@@ -947,12 +909,11 @@ def main():
     rd.add_argument("session_id", nargs="?", default=None,
                     help="Session UUID (or partial match)")
     rd.add_argument("--last", type=int, help="Read N most recent sessions")
-    rd.add_argument("--brief", action="store_true",
-                    help="Condensed single-line view (first ~100 chars per turn)")
     rd.add_argument("--no-tool-results", action="store_true",
                     help="Filter out tool_result blocks from output")
     rd.add_argument("--limit", "-n", type=int, help="Max entries to show")
     rd.add_argument("--since", help="Only entries after this ISO timestamp")
+    rd.add_argument("--until", help="Only entries before this ISO timestamp")
     rd.add_argument("--types", help="Comma-separated entry types (user,assistant,system)")
     rd.set_defaults(func=cmd_read)
 
@@ -963,6 +924,7 @@ def main():
                     help="Filter out tool_result blocks from output")
     rc.add_argument("--limit", "-n", type=int, default=50, help="Max entries to show")
     rc.add_argument("--since", help="Only entries after this ISO timestamp")
+    rc.add_argument("--until", help="Only entries before this ISO timestamp")
     rc.add_argument("--types", help="Comma-separated entry types (user,assistant,system)")
     rc.set_defaults(func=cmd_recent)
 
@@ -974,12 +936,14 @@ def main():
                      help="Skip tool_result entries when searching")
     sr.add_argument("--limit", "-n", type=int, default=20, help="Max results")
     sr.add_argument("--since", help="Only entries after this ISO timestamp")
+    sr.add_argument("--until", help="Only entries before this ISO timestamp")
     sr.set_defaults(func=cmd_search)
 
     # tools
     tl = subparsers.add_parser("tools", help="Analyze tool usage patterns")
     add_common_args(tl)
     tl.add_argument("--since", help="Only entries after this ISO timestamp")
+    tl.add_argument("--until", help="Only entries before this ISO timestamp")
     tl.set_defaults(func=cmd_tools)
 
     args = parser.parse_args()

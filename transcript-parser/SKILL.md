@@ -21,7 +21,7 @@ python ~/.claude/skills/transcript-parser/scripts/parse_transcript.py <command> 
 |---------|-------------|---------|
 | `list-sessions` (or `ls`) | List sessions across all projects | `... ls -n 10` |
 | `read <session-id>` | Read a specific session's conversation | `... read deaf3112-7eb8-...` |
-| `read --last N` | Read N most recent sessions (batch mode) | `... read --last 3 --brief` |
+| `read --last N` | Read N most recent sessions (batch mode) | `... read --last 3 --no-tool-results` |
 | `recent` | Show recent messages across all sessions | `... recent --since 2026-02-27` |
 | `search <query>` | Search transcripts for keywords | `... search "meridian"` |
 | `tools` | Tool usage patterns and workflow analysis | `... tools --since 2026-02-01` |
@@ -34,15 +34,15 @@ python ~/.claude/skills/transcript-parser/scripts/parse_transcript.py <command> 
 | `--project` / `-p` | Filter to a specific project (partial match on slug) |
 | `--include-subagents` | Include subagent messages (excluded by default) |
 | `--limit` / `-n` | Max entries/results to return |
-| `--since` | Filter by time — bare dates use local timezone (e.g. `--since 2026-03-03`), full ISO timestamps use UTC |
+| `--since` | Lower bound for time filtering — bare dates use local timezone (e.g. `--since 2026-03-03`), full ISO timestamps use UTC |
+| `--until` | Upper bound for time filtering — bare dates use local timezone (e.g. `--until 2026-03-04`), full ISO timestamps use UTC |
 | `--types` | Comma-separated entry types: `user`, `assistant`, `system` |
 | `--no-tool-results` | Filter out tool result blocks — shows only human-typed messages and assistant text (read, recent, search) |
-| `--brief` | Single-line condensed view per entry — shows conversation arc without full content (read) |
-| `--last N` | Read N most recent sessions in one call — combine with `--brief` for arc views (read) |
+| `--last N` | Read N most recent sessions in one call (read) |
 
 ## How Transcripts Work
 
-Each Claude Code session produces a JSONL file at `~/.claude/projects/{project-slug}/{session-uuid}.jsonl`. Project slugs are the working directory path with `/` replaced by `-` (e.g., `/Users/mark/clawd` → `-Users-mark-clawd`).
+Each Claude Code session produces a JSONL file at `~/.claude/projects/{project-slug}/{session-uuid}.jsonl`. Project slugs are the working directory path with `/` replaced by `-` (e.g., `/Users/mark/clawd` -> `-Users-mark-clawd`).
 
 Key things to know:
 - **One session = one file.** Sessions don't span multiple files.
@@ -54,19 +54,26 @@ For the full schema, read [references/transcript-schema.md](references/transcrip
 
 ## Workflow Patterns
 
+### "Summarize Monday and Tuesday's work"
+```bash
+# Step 1: See all sessions in the date range
+python .../parse_transcript.py ls --since 2026-03-02 --until 2026-03-04 -p project-slug
+
+# Step 2: Read sessions with full content (no truncation)
+python .../parse_transcript.py read --last 50 --since 2026-03-02 --until 2026-03-04 -p project-slug --no-tool-results
+
+# Step 3: Count specific events
+python .../parse_transcript.py search "pr create" --since 2026-03-02 --until 2026-03-04 -p project-slug
+```
+
 ### "What did I work on yesterday?"
 ```bash
-python .../parse_transcript.py read --last 5 --brief --since 2026-02-27
+python .../parse_transcript.py read --last 5 --since 2026-02-27 --no-tool-results
 ```
 
 ### "Show me my last 10 sessions"
 ```bash
 python .../parse_transcript.py ls -n 10
-```
-
-### "Show me the conversation arc from recent sessions"
-```bash
-python .../parse_transcript.py read --last 5 --brief --no-tool-results
 ```
 
 ### "Read user messages only (no tool output noise)"
@@ -106,6 +113,12 @@ python .../parse_transcript.py read <session-uuid>
 - Compare session lengths across projects to spot which projects involve longest sessions
 - Search for error patterns (`"is_error": true` in tool results) to find friction points
 - Look at Agent tool usage to understand delegation patterns
+
+## Anti-patterns
+
+- **Never truncate output with `head` or `tail`.** Use `--limit` to cap entries, or use `search` to find specific events. Shell truncation silently drops data and leads to wrong conclusions.
+- **Don't read sessions one by one for recaps.** Use `ls --since X --until Y` to see all sessions, then `search` to count specific events (PRs, deploys, errors) across the date range.
+- **Don't guess counts from narratives.** Use `search "gh pr create" --since X` to get exact PR counts, not skimming session summaries.
 
 ## Important Notes
 
