@@ -112,13 +112,21 @@ def slim_entry(entry: dict) -> dict:
 def parse_timestamp(ts: str) -> datetime:
     """Parse ISO timestamp, handling both Z and +00:00 suffixes.
 
-    Always returns a timezone-aware datetime (UTC). Date-only strings
-    like '2026-02-25' are treated as midnight UTC.
+    Returns a timezone-aware datetime. Bare date strings (e.g. '2026-02-25')
+    are interpreted as midnight in the local timezone — the intuitive meaning
+    when a user types --since 2026-02-25. Full ISO timestamps with time
+    components default to UTC if no timezone is specified.
     """
+    # Bare date (no time component) → interpret as midnight local time
+    if len(ts) <= 10 and "T" not in ts:
+        local_tz = datetime.now().astimezone().tzinfo
+        dt = datetime.fromisoformat(ts)
+        return dt.replace(tzinfo=local_tz)
+
     if ts.endswith("Z"):
         ts = ts[:-1] + "+00:00"
     dt = datetime.fromisoformat(ts)
-    # Ensure timezone-aware — naive datetimes (e.g. date-only input) default to UTC
+    # Ensure timezone-aware — naive datetimes default to UTC
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
@@ -254,8 +262,13 @@ def dedup_assistant_entries(entries: list[dict]) -> list[dict]:
     return result
 
 
-def format_content(content) -> str:
-    """Format message content (string or array) into readable text."""
+def format_content(content, no_tool_results: bool = False) -> str:
+    """Format message content (string or array) into readable text.
+
+    Args:
+        content: Raw message content (string, list of blocks, or other).
+        no_tool_results: If True, skip tool_result blocks entirely.
+    """
     if isinstance(content, str):
         return content
 
@@ -309,6 +322,8 @@ def format_content(content) -> str:
                 parts.append(f"[tool: {name}]")
 
         elif block_type == "tool_result":
+            if no_tool_results:
+                continue
             result_content = block.get("content", "")
             is_error = block.get("is_error", False)
             prefix = "[tool error]" if is_error else "[tool result]"
@@ -322,8 +337,13 @@ def format_content(content) -> str:
     return "\n".join(parts)
 
 
-def format_entry_readable(entry: dict) -> str:
-    """Format a single entry as readable text."""
+def format_entry_readable(entry: dict, no_tool_results: bool = False) -> str:
+    """Format a single entry as readable text.
+
+    Args:
+        entry: Parsed JSONL entry dict.
+        no_tool_results: If True, skip tool_result blocks in content formatting.
+    """
     entry_type = entry.get("type", "unknown")
     ts = entry.get("timestamp", "")
     if ts:
@@ -338,7 +358,8 @@ def format_entry_readable(entry: dict) -> str:
     if entry_type == "user":
         is_sidechain = entry.get("isSidechain", False)
         role = "[subagent-user]" if is_sidechain else "[user]"
-        content = format_content(entry.get("message", {}).get("content", ""))
+        content = format_content(entry.get("message", {}).get("content", ""),
+                                 no_tool_results=no_tool_results)
         return f"{ts_str} {role}\n{content}\n"
 
     elif entry_type == "assistant":
@@ -346,7 +367,8 @@ def format_entry_readable(entry: dict) -> str:
         model = entry.get("message", {}).get("model", "")
         role = "[subagent-assistant]" if is_sidechain else "[assistant]"
         model_tag = f" ({model})" if model else ""
-        content = format_content(entry.get("message", {}).get("content", []))
+        content = format_content(entry.get("message", {}).get("content", []),
+                                 no_tool_results=no_tool_results)
         return f"{ts_str} {role}{model_tag}\n{content}\n"
 
     elif entry_type == "system":
@@ -361,11 +383,77 @@ def format_entry_readable(entry: dict) -> str:
     return ""
 
 
+def _extract_text_blocks(content) -> str:
+    """Extract and join text blocks from message content."""
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return str(content).strip()
+    texts = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text":
+            text = block.get("text", "").strip()
+            if text:
+                texts.append(text)
+    return " ".join(texts)
+
+
+def format_entry_brief(entry: dict) -> str:
+    """Format a single entry as a condensed single-line summary.
+
+    Shows the first ~100 characters of text content per turn for a quick
+    conversation arc view. System entries are skipped.
+    """
+    entry_type = entry.get("type", "unknown")
+
+    if entry_type == "system":
+        return ""
+
+    ts = entry.get("timestamp", "")
+    if ts:
+        try:
+            dt = parse_timestamp(ts)
+            ts_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            ts_str = ts
+    else:
+        ts_str = ""
+
+    if entry_type == "user":
+        is_sidechain = entry.get("isSidechain", False)
+        role = "[subagent-user]" if is_sidechain else "[user]"
+        text = _extract_text_blocks(entry.get("message", {}).get("content", ""))
+        if not text:
+            return ""
+        return f"{ts_str} {role} {text[:100]}"
+
+    elif entry_type == "assistant":
+        is_sidechain = entry.get("isSidechain", False)
+        role = "[subagent-assistant]" if is_sidechain else "[assistant]"
+        text = _extract_text_blocks(entry.get("message", {}).get("content", []))
+        if not text:
+            return ""
+        return f"{ts_str} {role} {text[:100]}"
+
+    return ""
+
+
 def read_session(path: Path, include_subagents: bool = False,
                  entry_types: set | None = None,
                  since: datetime | None = None,
-                 limit: int | None = None) -> list[dict]:
-    """Read and filter entries from a session file."""
+                 limit: int | None = None,
+                 no_tool_results: bool = False) -> list[dict]:
+    """Read and filter entries from a session file.
+
+    Args:
+        path: Path to the JSONL session file.
+        include_subagents: If True, include subagent (sidechain) entries.
+        entry_types: If set, only include entries with these types.
+        since: If set, only include entries after this timestamp.
+        limit: If set, return only the last N entries.
+        no_tool_results: If True, skip user entries that contain only tool_result
+            blocks (no human-typed content).
+    """
     entries = []
     for entry in iter_jsonl(path):
         etype = entry.get("type", "")
@@ -391,6 +479,13 @@ def read_session(path: Path, include_subagents: bool = False,
                         continue
                 except (ValueError, TypeError):
                     pass
+
+        # Skip user entries that are purely tool results (no human text)
+        if no_tool_results and etype == "user":
+            content = entry.get("message", {}).get("content", "")
+            if isinstance(content, list) and content:
+                if all(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+                    continue
 
         entries.append(entry)
 
@@ -508,40 +603,54 @@ def cmd_list_sessions(args):
             print()
 
 
-def cmd_read(args):
-    """Read a specific session."""
-    session_id = args.session_id
-    found = None
-
+def _find_session_file(session_id: str) -> Path | None:
+    """Find a session file by exact or partial UUID match."""
     for project_dir in get_project_dirs():
         candidate = project_dir / f"{session_id}.jsonl"
         if candidate.exists():
-            found = candidate
-            break
+            return candidate
 
-    if not found:
-        # Try partial match
-        for project_dir in get_project_dirs():
-            for f in project_dir.glob("*.jsonl"):
-                if session_id in f.stem:
-                    found = f
-                    break
-            if found:
-                break
+    # Try partial match
+    for project_dir in get_project_dirs():
+        for f in project_dir.glob("*.jsonl"):
+            if session_id in f.stem:
+                return f
 
-    if not found:
-        print(f"Session not found: {session_id}", file=sys.stderr)
-        sys.exit(1)
+    return None
 
-    entry_types = set(args.types.split(",")) if args.types else None
-    since = parse_timestamp(args.since) if args.since else None
 
+def _collect_sessions(project_filter: str | None = None,
+                      since: datetime | None = None) -> list[dict]:
+    """Collect session summaries across projects, optionally filtered."""
+    sessions = []
+    for project_dir in get_project_dirs():
+        if project_filter and project_filter not in project_dir.name:
+            continue
+        for session_file in get_session_files(project_dir):
+            summary = session_summary(session_file)
+            if summary:
+                if since and summary.get("started"):
+                    try:
+                        if parse_timestamp(summary["started"]) < since:
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+                summary["project"] = project_dir.name
+                sessions.append(summary)
+    sessions.sort(key=lambda s: s.get("started") or "", reverse=True)
+    return sessions
+
+
+def _print_session(path: Path, args, entry_types, since, brief: bool,
+                   no_tool_results: bool):
+    """Read and print a single session's entries."""
     entries = read_session(
-        found,
+        path,
         include_subagents=args.include_subagents,
         entry_types=entry_types,
         since=since,
         limit=args.limit,
+        no_tool_results=no_tool_results,
     )
 
     if args.json:
@@ -549,9 +658,55 @@ def cmd_read(args):
         print()
     else:
         for entry in entries:
-            formatted = format_entry_readable(entry)
+            if brief:
+                formatted = format_entry_brief(entry)
+            else:
+                formatted = format_entry_readable(entry, no_tool_results=no_tool_results)
             if formatted:
                 print(formatted)
+
+
+def cmd_read(args):
+    """Read a specific session or batch-read recent sessions with --last N."""
+    if not args.session_id and not args.last:
+        print("Error: provide a session_id or --last N", file=sys.stderr)
+        sys.exit(1)
+    if args.session_id and args.last:
+        print("Error: provide session_id or --last, not both", file=sys.stderr)
+        sys.exit(1)
+
+    entry_types = set(args.types.split(",")) if args.types else None
+    since = parse_timestamp(args.since) if args.since else None
+    brief = getattr(args, "brief", False)
+    no_tool_results = getattr(args, "no_tool_results", False)
+
+    # Brief mode auto-enables no_tool_results
+    if brief:
+        no_tool_results = True
+
+    if args.session_id:
+        found = _find_session_file(args.session_id)
+        if not found:
+            print(f"Session not found: {args.session_id}", file=sys.stderr)
+            sys.exit(1)
+        _print_session(found, args, entry_types, since, brief, no_tool_results)
+    else:
+        # Batch read: --last N
+        sessions = _collect_sessions(
+            project_filter=args.project,
+            since=since,
+        )
+        sessions = sessions[:args.last]
+
+        for s in sessions:
+            path = Path(s["file"])
+            project = s.get("project", "")
+            started = s.get("started", "")[:19]
+            msg_count = s.get("message_count", 0)
+            print(f"\n{'='*60}")
+            print(f"  {project} — {started} — {msg_count} msgs")
+            print(f"{'='*60}\n")
+            _print_session(path, args, entry_types, since, brief, no_tool_results)
 
 
 def cmd_recent(args):
@@ -560,6 +715,7 @@ def cmd_recent(args):
     limit = args.limit or 50
     since = parse_timestamp(args.since) if args.since else None
     entry_types = set(args.types.split(",")) if args.types else None
+    no_tool_results = getattr(args, "no_tool_results", False)
 
     all_entries = []
 
@@ -577,6 +733,7 @@ def cmd_recent(args):
                 include_subagents=args.include_subagents,
                 entry_types=entry_types,
                 since=since,
+                no_tool_results=no_tool_results,
             )
             for e in entries:
                 e["_project"] = project_dir.name
@@ -613,7 +770,7 @@ def cmd_recent(args):
                 print(f"\n{'='*60}")
                 print(f"  Project: {proj}")
                 print(f"{'='*60}\n")
-            formatted = format_entry_readable(entry)
+            formatted = format_entry_readable(entry, no_tool_results=no_tool_results)
             if formatted:
                 print(formatted)
 
@@ -779,7 +936,13 @@ def main():
     # read
     rd = subparsers.add_parser("read", help="Read a specific session")
     add_common_args(rd)
-    rd.add_argument("session_id", help="Session UUID (or partial match)")
+    rd.add_argument("session_id", nargs="?", default=None,
+                    help="Session UUID (or partial match)")
+    rd.add_argument("--last", type=int, help="Read N most recent sessions")
+    rd.add_argument("--brief", action="store_true",
+                    help="Condensed single-line view (first ~100 chars per turn)")
+    rd.add_argument("--no-tool-results", action="store_true",
+                    help="Filter out tool_result blocks from output")
     rd.add_argument("--limit", "-n", type=int, help="Max entries to show")
     rd.add_argument("--since", help="Only entries after this ISO timestamp")
     rd.add_argument("--types", help="Comma-separated entry types (user,assistant,system)")
@@ -788,6 +951,8 @@ def main():
     # recent
     rc = subparsers.add_parser("recent", help="Show recent messages across sessions")
     add_common_args(rc)
+    rc.add_argument("--no-tool-results", action="store_true",
+                    help="Filter out tool_result blocks from output")
     rc.add_argument("--limit", "-n", type=int, default=50, help="Max entries to show")
     rc.add_argument("--since", help="Only entries after this ISO timestamp")
     rc.add_argument("--types", help="Comma-separated entry types (user,assistant,system)")
