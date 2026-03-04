@@ -75,6 +75,9 @@ Look for these specific patterns in the transcript and environment data:
 - **Cross-session knowledge**: Insights or decisions that keep being re-established because they're not persisted
 - **Convention drift**: Project patterns changing without CLAUDE.md or docs being updated
 
+## Reference files
+- `references/friction-patterns.md` — Catalog of known friction patterns, detection methods, and example improvements. Read before analyzing sessions to ensure consistent coverage.
+
 ## Step 4: Write the Report
 
 Create `.claude/improvements/IMPROVEMENTS.md` (create the directory if needed).

@@ -23,7 +23,11 @@ Periodic curation of the knowledge graph at `knowledge/`. Reviews docs for stale
 
 Read `knowledge/_index.md` to see all domains. If targeting a specific domain, read that domain's `_index.md` too.
 
-## Step 2: Inventory Current State
+## Step 2: Read Maintenance Rules
+
+Read `knowledge/knowledge-maintenance.md` before doing anything. It defines the size limits, split/merge/delete criteria, and pruning rules. This is the source of truth for how the graph should be maintained — follow it, and update it if you discover new frictions or better practices during this run.
+
+## Step 3: Inventory Current State
 
 For each domain in scope:
 
@@ -31,8 +35,9 @@ For each domain in scope:
 - Check cross-links between docs (grep for markdown links)
 - Check last-modified dates via `git log`
 - Note doc sizes (too large → split, too thin → merge)
+- Flag docs that violate the size limits from the maintenance rules
 
-## Step 3: Mine Recent Sessions
+## Step 4: Mine Recent Sessions
 
 Activate the `/transcript-parser` skill — it provides commands for listing sessions, reading transcripts, and searching across conversations. Use it to find:
 
@@ -45,7 +50,7 @@ Also check `memory/daily/` logs from the same period for knowledge-relevant entr
 
 Default time window: 7 days. Adjustable via `--since` flag.
 
-## Step 4: Analyze for Issues
+## Step 5: Analyze for Issues
 
 Check for:
 
@@ -61,7 +66,7 @@ Check for:
 
 **Gaps** — topics discussed in sessions that have no docs, gaps listed in `_index.md` that now have enough content to fill
 
-## Step 5: Execute Changes
+## Step 6: Execute Changes
 
 Act on each issue found:
 
@@ -79,7 +84,7 @@ Document format for new/updated docs:
 - Standard markdown relative links (not wiki-style)
 - Useful prose, not just metadata containers
 
-## Step 6: Report
+## Step 7: Report
 
 Present a concise summary:
 
