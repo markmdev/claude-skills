@@ -118,6 +118,18 @@ gh release create vX.Y.Z \
 
 If the project has install or upgrade instructions (like `go install ...@vX.Y.Z`, `npm install`, `curl | bash`), include them at the bottom of the release notes.
 
+## Step 7: Update Marketplace (if applicable)
+
+If the project has a `.claude-plugin/plugin.json`, it may be distributed via a marketplace repo. Check if a marketplace exists by looking for a marketplace repo reference in the project's docs or CLAUDE.md.
+
+If the project is listed in a marketplace (e.g., `markmdev/claude-plugins`):
+
+1. Clone or pull the marketplace repo
+2. Update the `version` field for this plugin in `.claude-plugin/marketplace.json`
+3. Commit and push
+
+**This step is critical.** Without updating the marketplace version, `/plugin update` will not pull the new release — it reads the version from the marketplace manifest, not from the plugin repo's tags.
+
 ## Edge Cases
 
 - **No commits since last tag**: Tell the user there's nothing to release. Don't create an empty release.
