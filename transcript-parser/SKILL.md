@@ -36,7 +36,7 @@ python ~/.claude/skills/transcript-parser/scripts/parse_transcript.py <command> 
 | `--limit` / `-n` | Max entries/results to return |
 | `--since` | Filter by time — bare dates use local timezone (e.g. `--since 2026-03-03`), full ISO timestamps use UTC |
 | `--types` | Comma-separated entry types: `user`, `assistant`, `system` |
-| `--no-tool-results` | Filter out tool result blocks — shows only human-typed messages and assistant text (read, recent) |
+| `--no-tool-results` | Filter out tool result blocks — shows only human-typed messages and assistant text (read, recent, search) |
 | `--brief` | Single-line condensed view per entry — shows conversation arc without full content (read) |
 | `--last N` | Read N most recent sessions in one call — combine with `--brief` for arc views (read) |
 

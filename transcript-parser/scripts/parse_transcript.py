@@ -781,6 +781,7 @@ def cmd_search(args):
     project_filter = args.project
     limit = args.limit or 20
     since = parse_timestamp(args.since) if args.since else None
+    no_tool_results = getattr(args, "no_tool_results", False)
 
     results = []
 
@@ -806,10 +807,17 @@ def cmd_search(args):
                         except (ValueError, TypeError):
                             pass
 
+                # Skip user entries that are purely tool results
+                if no_tool_results and etype == "user":
+                    content_raw = entry.get("message", {}).get("content", "")
+                    if isinstance(content_raw, list) and content_raw:
+                        if all(isinstance(b, dict) and b.get("type") == "tool_result" for b in content_raw):
+                            continue
+
                 # Search in message content
                 msg = entry.get("message", {})
                 content = msg.get("content", "")
-                content_str = format_content(content)
+                content_str = format_content(content, no_tool_results=no_tool_results)
 
                 if query in content_str.lower():
                     results.append({
@@ -962,6 +970,8 @@ def main():
     sr = subparsers.add_parser("search", help="Search transcripts for a keyword")
     add_common_args(sr)
     sr.add_argument("query", help="Search query (case-insensitive)")
+    sr.add_argument("--no-tool-results", action="store_true",
+                     help="Skip tool_result entries when searching")
     sr.add_argument("--limit", "-n", type=int, default=20, help="Max results")
     sr.add_argument("--since", help="Only entries after this ISO timestamp")
     sr.set_defaults(func=cmd_search)
