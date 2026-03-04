@@ -21,6 +21,7 @@ python ~/.claude/skills/transcript-parser/scripts/parse_transcript.py <command> 
 |---------|-------------|---------|
 | `list-sessions` (or `ls`) | List sessions across all projects | `... ls -n 10` |
 | `read <session-id>` | Read a specific session's conversation | `... read deaf3112-7eb8-...` |
+| `read --last N` | Read N most recent sessions (batch mode) | `... read --last 3 --brief` |
 | `recent` | Show recent messages across all sessions | `... recent --since 2026-02-27` |
 | `search <query>` | Search transcripts for keywords | `... search "meridian"` |
 | `tools` | Tool usage patterns and workflow analysis | `... tools --since 2026-02-01` |
@@ -33,8 +34,11 @@ python ~/.claude/skills/transcript-parser/scripts/parse_transcript.py <command> 
 | `--project` / `-p` | Filter to a specific project (partial match on slug) |
 | `--include-subagents` | Include subagent messages (excluded by default) |
 | `--limit` / `-n` | Max entries/results to return |
-| `--since` | ISO timestamp — only show entries after this time |
+| `--since` | Filter by time — bare dates use local timezone (e.g. `--since 2026-03-03`), full ISO timestamps use UTC |
 | `--types` | Comma-separated entry types: `user`, `assistant`, `system` |
+| `--no-tool-results` | Filter out tool result blocks — shows only human-typed messages and assistant text (read, recent) |
+| `--brief` | Single-line condensed view per entry — shows conversation arc without full content (read) |
+| `--last N` | Read N most recent sessions in one call — combine with `--brief` for arc views (read) |
 
 ## How Transcripts Work
 
@@ -52,12 +56,22 @@ For the full schema, read [references/transcript-schema.md](references/transcrip
 
 ### "What did I work on yesterday?"
 ```bash
-python .../parse_transcript.py recent --since 2026-02-27T00:00:00Z --types user,assistant -n 100
+python .../parse_transcript.py read --last 5 --brief --since 2026-02-27
 ```
 
 ### "Show me my last 10 sessions"
 ```bash
 python .../parse_transcript.py ls -n 10
+```
+
+### "Show me the conversation arc from recent sessions"
+```bash
+python .../parse_transcript.py read --last 5 --brief --no-tool-results
+```
+
+### "Read user messages only (no tool output noise)"
+```bash
+python .../parse_transcript.py read <session-uuid> --types user --no-tool-results
 ```
 
 ### "Find where I discussed topic X"
@@ -72,7 +86,7 @@ python .../parse_transcript.py tools -p project-slug
 
 ### "Show me my workflow patterns this week"
 ```bash
-python .../parse_transcript.py tools --since 2026-02-24T00:00:00Z
+python .../parse_transcript.py tools --since 2026-02-24
 ```
 
 ### "Read the full conversation from session Z"
