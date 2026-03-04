@@ -17,7 +17,7 @@ Automate the release pipeline from version detection through GitHub Release crea
 
 ## Step 1: Detect Current Version
 
-Find the version source. Check in this order. Record ALL files that contain a version — you'll update all of them in Step 4. The first match determines the canonical current version.
+Find ALL files that contain a version string. Check every one of these — don't stop at the first match:
 
 1. `package.json` → `version` field
 2. `Cargo.toml` → `version` under `[package]`
@@ -25,7 +25,9 @@ Find the version source. Check in this order. Record ALL files that contain a ve
 4. `.meridian/.version` → plain text version string
 5. `VERSION` or `VERSION.txt` → plain text
 6. `.claude-plugin/plugin.json` → `version` field
-7. Git tags → first, run `git fetch --tags` to sync with remote, then find the latest semver tag: `git tag --sort=-v:refname | grep -E '^v?[0-9]' | head -1`
+7. Git tags → run `git fetch --tags`, then `git tag --sort=-v:refname | grep -E '^v?[0-9]' | head -1`
+
+**Print the full list** of version files found and their current values before proceeding. Every file in this list MUST be updated in Step 4. If any versions are out of sync, note that — it means a previous release missed a file.
 
 If nothing is found, ask the user what version to start from.
 
@@ -92,6 +94,8 @@ Update every file identified in Step 1:
 - Any other files that embed the version (README badges, etc.) — search if unsure
 
 If the project has `package-lock.json`, run `npm install --package-lock-only` to sync it.
+
+**Verify before continuing:** re-read every version file from Step 1 and confirm they all show the new version. If any were missed, fix them now.
 
 ## Step 5: Commit, Tag, Push
 
