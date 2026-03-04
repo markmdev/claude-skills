@@ -23,7 +23,7 @@ python ~/.claude/skills/transcript-parser/scripts/parse_transcript.py <command> 
 | `read <session-id>` | Read a specific session's conversation | `... read deaf3112-7eb8-...` |
 | `read --last N` | Read N most recent sessions (batch mode) | `... read --last 3 --no-tool-results` |
 | `recent` | Show recent messages across all sessions | `... recent --since 2026-02-27` |
-| `search <query>` | Search transcripts for keywords | `... search "meridian"` |
+| `search <pattern>` | Search transcripts with regex patterns | `... search "git commit\|git push"` |
 | `tools` | Tool usage patterns and workflow analysis | `... tools --since 2026-02-01` |
 
 ### Common Flags
@@ -83,7 +83,14 @@ python .../parse_transcript.py read <session-uuid> --types user --no-tool-result
 
 ### "Find where I discussed topic X"
 ```bash
+# Simple string search
 python .../parse_transcript.py search "topic X" -n 20
+
+# Regex: match multiple terms at once
+python .../parse_transcript.py search "deploy|release|ship" -n 20
+
+# Regex: match patterns like PR numbers
+python .../parse_transcript.py search "PR #\d+" -n 10
 ```
 
 ### "What tools do I use most in project Y?"

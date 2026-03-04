@@ -9,6 +9,7 @@ and computing usage stats.
 import argparse
 import json
 import os
+import re
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -731,13 +732,18 @@ def cmd_recent(args):
 
 
 def cmd_search(args):
-    """Search transcripts for a keyword/pattern."""
-    query = args.query.lower()
+    """Search transcripts for a regex pattern (falls back to literal substring)."""
     project_filter = args.project
     limit = args.limit or 20
     since = parse_timestamp(args.since) if args.since else None
     until = parse_timestamp(args.until) if args.until else None
     no_tool_results = getattr(args, "no_tool_results", False)
+
+    # Compile regex pattern (case-insensitive). Fall back to escaped literal on bad regex.
+    try:
+        pattern = re.compile(args.query, re.IGNORECASE)
+    except re.error:
+        pattern = re.compile(re.escape(args.query), re.IGNORECASE)
 
     results = []
 
@@ -778,14 +784,14 @@ def cmd_search(args):
                 content = msg.get("content", "")
                 content_str = format_content(content, no_tool_results=no_tool_results)
 
-                if query in content_str.lower():
+                if pattern.search(content_str):
                     results.append({
                         "project": project_dir.name,
                         "session_id": entry.get("sessionId", session_file.stem),
                         "timestamp": entry.get("timestamp", ""),
                         "type": etype,
                         "role": msg.get("role", etype),
-                        "match_context": _extract_match_context(content_str, query),
+                        "match_context": _extract_match_context(content_str, pattern),
                         "file": str(session_file),
                     })
 
@@ -808,14 +814,15 @@ def cmd_search(args):
             print()
 
 
-def _extract_match_context(text: str, query: str, context_chars: int = 120) -> str:
-    """Extract text around the first match of query."""
-    lower = text.lower()
-    idx = lower.find(query)
-    if idx == -1:
+def _extract_match_context(text: str, pattern: re.Pattern, context_chars: int = 120) -> str:
+    """Extract text around the first regex match."""
+    match = pattern.search(text)
+    if not match:
         return text[:context_chars]
+    idx = match.start()
+    match_len = match.end() - match.start()
     start = max(0, idx - context_chars // 2)
-    end = min(len(text), idx + len(query) + context_chars // 2)
+    end = min(len(text), idx + match_len + context_chars // 2)
     snippet = text[start:end].replace("\n", " ")
     if start > 0:
         snippet = "..." + snippet
@@ -929,9 +936,9 @@ def main():
     rc.set_defaults(func=cmd_recent)
 
     # search
-    sr = subparsers.add_parser("search", help="Search transcripts for a keyword")
+    sr = subparsers.add_parser("search", help="Search transcripts with regex patterns")
     add_common_args(sr)
-    sr.add_argument("query", help="Search query (case-insensitive)")
+    sr.add_argument("query", help="Regex pattern (case-insensitive). Falls back to literal match on invalid regex.")
     sr.add_argument("--no-tool-results", action="store_true",
                      help="Skip tool_result entries when searching")
     sr.add_argument("--limit", "-n", type=int, default=20, help="Max results")
